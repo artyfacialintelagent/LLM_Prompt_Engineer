@@ -41,6 +41,7 @@ class Searge_LLM_Node:
                 "max_tokens": ("INT", {"default": 4096, "min": 1, "max": 8192}),
                 "apply_instructions": ("BOOLEAN", {"default": True}),
                 "instructions": ("STRING", {"multiline": False, "default": DEFAULT_INSTRUCTIONS}),
+                "strip_thinking": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "adv_options_config": ("SRGADVOPTIONSCONFIG",),
@@ -49,10 +50,10 @@ class Searge_LLM_Node:
 
     CATEGORY = "Searge/LLM"
     FUNCTION = "main"
-    RETURN_TYPES = ("STRING", "STRING",)
-    RETURN_NAMES = ("generated", "original",)
+    RETURN_TYPES = ("STRING", "STRING", "STRING",)
+    RETURN_NAMES = ("thinking", "generated", "original",)
 
-    def main(self, text, random_seed, model, max_tokens, apply_instructions, instructions, adv_options_config=None):
+    def main(self, text, random_seed, model, max_tokens, apply_instructions, instructions, strip_thinking, adv_options_config=None):
         model_path = os.path.join(GLOBAL_MODELS_DIR, model)
 
         if model.endswith(".gguf"):
@@ -174,10 +175,20 @@ class Searge_LLM_Node:
                 ]
 
             llm_result = model_to_use.create_chat_completion(messages, **generate_kwargs)
+            result_text = llm_result['choices'][0]['message']['content'].strip()
 
-            return (llm_result['choices'][0]['message']['content'].strip(), text)
+            thinking = ""
+            if "<think>" in result_text and "</think>" in result_text:
+                start = result_text.find("<think>")
+                end = result_text.find("</think>")
+                if start != -1 and end != -1 and end > start:
+                    thinking = result_text[start+7:end].strip()
+                    if strip_thinking:
+                        result_text = (result_text[:start] + result_text[end+8:]).strip()
+
+            return (thinking, result_text, text)
         else:
-            return ("NOT A GGUF MODEL", text)
+            return ("", "NOT A GGUF MODEL", text)
 
 
 class Searge_Output_Node:
