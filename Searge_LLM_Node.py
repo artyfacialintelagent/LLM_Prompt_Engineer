@@ -68,8 +68,8 @@ class Searge_LLM_Node:
                 model_path=model_path,
                 n_gpu_layers=-1,
                 seed=random_seed,
-                verbose=False,
-                n_ctx=2048,
+                verbose=True,
+                n_ctx=8192,
             )
 
             if apply_instructions:
