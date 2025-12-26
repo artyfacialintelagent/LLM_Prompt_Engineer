@@ -39,6 +39,7 @@ class Searge_LLM_Node:
                 "random_seed": ("INT", {"default": 1234567890, "min": 0, "max": 0xffffffffffffffff}),
                 "model": (model_options,),
                 "max_tokens": ("INT", {"default": 4096, "min": 1, "max": 8192}),
+                "context_size": ("INT", {"default": 8192, "min": 2048, "max": 32768}),
                 "apply_instructions": ("BOOLEAN", {"default": True}),
                 "instructions": ("STRING", {"multiline": False, "default": DEFAULT_INSTRUCTIONS}),
                 "strip_thinking": ("BOOLEAN", {"default": False}),
@@ -53,7 +54,7 @@ class Searge_LLM_Node:
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("thinking", "generated", "original",)
 
-    def main(self, text, random_seed, model, max_tokens, apply_instructions, instructions, strip_thinking, adv_options_config=None):
+    def main(self, text, random_seed, model, max_tokens, context_size, apply_instructions, instructions, strip_thinking, adv_options_config=None):
         model_path = os.path.join(GLOBAL_MODELS_DIR, model)
 
         if model.endswith(".gguf"):
@@ -69,8 +70,8 @@ class Searge_LLM_Node:
                 model_path=model_path,
                 n_gpu_layers=-1,
                 seed=random_seed,
-                verbose=True,
-                n_ctx=8192,
+                verbose=False,
+                n_ctx=context_size,
             )
 
             if apply_instructions:
