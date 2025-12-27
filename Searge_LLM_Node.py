@@ -71,6 +71,7 @@ class Searge_LLM_Node:
                 n_gpu_layers=-1,
                 seed=random_seed,
                 verbose=False,
+                flash_attn=True,
                 n_ctx=context_size,
             )
 
