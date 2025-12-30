@@ -1,5 +1,6 @@
 import importlib
 import os
+import random
 
 import folder_paths
 
@@ -40,6 +41,7 @@ class Searge_LLM_Node:
                 "model": (model_options,),
                 "max_tokens": ("INT", {"default": 4096, "min": 1, "max": 8192}),
                 "context_size": ("INT", {"default": 8192, "min": 2048, "max": 32768}),
+                "batch_size": ("INT", {"default": 1, "min": 1, "max": 100}),
                 "apply_instructions": ("BOOLEAN", {"default": True}),
                 "instructions": ("STRING", {"multiline": False, "default": DEFAULT_INSTRUCTIONS}),
                 "strip_thinking": ("BOOLEAN", {"default": False}),
@@ -54,8 +56,9 @@ class Searge_LLM_Node:
     FUNCTION = "main"
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("thinking", "generated", "original",)
+    OUTPUT_IS_LIST = (True, True, True,)
 
-    def main(self, text, random_seed, model, max_tokens, context_size, apply_instructions, instructions, strip_thinking, concatenate_user_prompt, adv_options_config=None):
+    def main(self, text, random_seed, model, max_tokens, context_size, batch_size, apply_instructions, instructions, strip_thinking, concatenate_user_prompt, adv_options_config=None):
         model_path = os.path.join(GLOBAL_MODELS_DIR, model)
 
         if model.endswith(".gguf"):
@@ -67,77 +70,100 @@ class Searge_LLM_Node:
                     if option in adv_options_config:
                         generate_kwargs[option] = adv_options_config[option]
 
+            # Generate batch_size seeds using PRNG
+            rng = random.Random(random_seed)
+            seeds = [rng.randint(0, 0xffffffffffffffff) for _ in range(batch_size)]
+            
+            # Load model once (will be reused for all batch iterations)
             model_to_use = Llama(
                 model_path=model_path,
                 n_gpu_layers=-1,
-                seed=random_seed,
+                seed=seeds[0],  # Initial seed
                 verbose=False,
                 flash_attn=True,
                 n_ctx=context_size,
             )
+            
+            # Storage for batch results
+            thinking_list = []
+            generated_list = []
+            original_list = []
 
-            if apply_instructions:
-                messages = [
-                    {"role": "system",
-                     "content": instructions},
-                    {"role": "user",
-                     "content": text}
-                ]
-            else:
-                messages = [
-                    {"role": "system",
-                     "content": f"You are a helpful assistant. Try your best to give the best response possible to "
-                                f"the user."},
-                    {"role": "user",
-                     "content": f"Create a detailed visually descriptive caption of this description, which will be "
-                                f"used as a prompt for a text to image AI system (caption only, no instructions like "
-                                f"\"create an image\").Remove any mention of digital artwork or artwork style. Give "
-                                f"detailed visual descriptions of the character(s), including ethnicity, skin tone, "
-                                f"expression etc. Imagine using keywords for a still for someone who has aphantasia. "
-                                f"Describe the image style, e.g. any photographic or art styles / techniques utilized. "
-                                f"Make sure to fully describe all aspects of the cinematography, with abundant "
-                                f"technical details and visual descriptions. If there is more than one image, combine "
-                                f"the elements and characters from all of the images creatively into a single "
-                                f"cohesive composition with a single background, inventing an interaction between the "
-                                f"characters. Be creative in combining the characters into a single cohesive scene. "
-                                f"Focus on two primary characters (or one) and describe an interesting interaction "
-                                f"between them, such as a hug, a kiss, a fight, giving an object, an emotional "
-                                f"reaction / interaction. If there is more than one background in the images, pick the "
-                                f"most appropriate one. Your output is only the caption itself, no comments or extra "
-                                f"formatting. The caption is in a single long paragraph. If you feel the images are "
-                                f"inappropriate, invent a new scene / characters inspired by these. Additionally, "
-                                f"incorporate a specific movie director's visual style and describe the lighting setup "
-                                f"in detail, including the type, color, and placement of light sources to create the "
-                                f"desired mood and atmosphere. Always frame the scene, including details about the "
-                                f"film grain, color grading, and any artifacts or characteristics specific. "
-                                f"Compress the output to be concise while retaining key visual details. MAX OUTPUT "
-                                f"SIZE no more than 250 characters."
-                                f"\nDescription : {text}"},
-                ]
+            # Process each batch iteration
+            for i in range(batch_size):
+                if batch_size > 1:
+                    print(f"[LLM enhancer] Processing batch {i+1}/{batch_size}...")
+                
+                # Update seed for this iteration
+                model_to_use.set_seed(seeds[i])
+                
+                if apply_instructions:
+                    messages = [
+                        {"role": "system",
+                         "content": instructions},
+                        {"role": "user",
+                         "content": text}
+                    ]
+                else:
+                    messages = [
+                        {"role": "system",
+                         "content": f"You are a helpful assistant. Try your best to give the best response possible to "
+                                    f"the user."},
+                        {"role": "user",
+                         "content": f"Create a detailed visually descriptive caption of this description, which will be "
+                                    f"used as a prompt for a text to image AI system (caption only, no instructions like "
+                                    f"\"create an image\").Remove any mention of digital artwork or artwork style. Give "
+                                    f"detailed visual descriptions of the character(s), including ethnicity, skin tone, "
+                                    f"expression etc. Imagine using keywords for a still for someone who has aphantasia. "
+                                    f"Describe the image style, e.g. any photographic or art styles / techniques utilized. "
+                                    f"Make sure to fully describe all aspects of the cinematography, with abundant "
+                                    f"technical details and visual descriptions. If there is more than one image, combine "
+                                    f"the elements and characters from all of the images creatively into a single "
+                                    f"cohesive composition with a single background, inventing an interaction between the "
+                                    f"characters. Be creative in combining the characters into a single cohesive scene. "
+                                    f"Focus on two primary characters (or one) and describe an interesting interaction "
+                                    f"between them, such as a hug, a kiss, a fight, giving an object, an emotional "
+                                    f"reaction / interaction. If there is more than one background in the images, pick the "
+                                    f"most appropriate one. Your output is only the caption itself, no comments or extra "
+                                    f"formatting. The caption is in a single long paragraph. If you feel the images are "
+                                    f"inappropriate, invent a new scene / characters inspired by these. Additionally, "
+                                    f"incorporate a specific movie director's visual style and describe the lighting setup "
+                                    f"in detail, including the type, color, and placement of light sources to create the "
+                                    f"desired mood and atmosphere. Always frame the scene, including details about the "
+                                    f"film grain, color grading, and any artifacts or characteristics specific. "
+                                    f"Compress the output to be concise while retaining key visual details. MAX OUTPUT "
+                                    f"SIZE no more than 250 characters."
+                                    f"\nDescription : {text}"},
+                    ]
 
-            llm_result = model_to_use.create_chat_completion(messages, **generate_kwargs)
-            result_text = llm_result['choices'][0]['message']['content'].strip()
+                llm_result = model_to_use.create_chat_completion(messages, **generate_kwargs)
+                result_text = llm_result['choices'][0]['message']['content'].strip()
 
-            thinking = ""
-            if "<think>" in result_text and "</think>" in result_text:
-                start = result_text.find("<think>")
-                end = result_text.find("</think>")
-                if start != -1 and end != -1 and end > start:
-                    thinking = result_text[start+7:end].strip()
-                    if strip_thinking:
-                        result_text = (result_text[:start] + result_text[end+8:]).strip()
+                thinking = ""
+                if "<think>" in result_text and "</think>" in result_text:
+                    start = result_text.find("<think>")
+                    end = result_text.find("</think>")
+                    if start != -1 and end != -1 and end > start:
+                        thinking = result_text[start+7:end].strip()
+                        if strip_thinking:
+                            result_text = (result_text[:start] + result_text[end+8:]).strip()
 
-            # Apply concatenation based on user preference
-            if concatenate_user_prompt == "beginning":
-                generated_output = text + "\n\n" + result_text
-            elif concatenate_user_prompt == "end":
-                generated_output = result_text + "\n\n" + text
-            else:  # "no"
-                generated_output = result_text
+                # Apply concatenation based on user preference
+                if concatenate_user_prompt == "beginning":
+                    generated_output = text + "\n\n" + result_text
+                elif concatenate_user_prompt == "end":
+                    generated_output = result_text + "\n\n" + text
+                else:  # "no"
+                    generated_output = result_text
 
-            return (thinking, generated_output, text)
+                thinking_list.append(thinking)
+                generated_list.append(generated_output)
+                original_list.append(text)
+
+            # Return as lists - OUTPUT_IS_LIST tells ComfyUI each item is a separate batch item
+            return (thinking_list, generated_list, original_list)
         else:
-            return ("", "NOT A GGUF MODEL", text)
+            return ([""], ["NOT A GGUF MODEL"], [text])
 
 
 class Searge_Output_Node:
