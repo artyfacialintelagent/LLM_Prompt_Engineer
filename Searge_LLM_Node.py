@@ -43,6 +43,7 @@ class Searge_LLM_Node:
                 "apply_instructions": ("BOOLEAN", {"default": True}),
                 "instructions": ("STRING", {"multiline": False, "default": DEFAULT_INSTRUCTIONS}),
                 "strip_thinking": ("BOOLEAN", {"default": False}),
+                "concatenate_user_prompt": (["no", "beginning", "end"], {"default": "end"}),
             },
             "optional": {
                 "adv_options_config": ("SRGADVOPTIONSCONFIG",),
@@ -54,7 +55,7 @@ class Searge_LLM_Node:
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("thinking", "generated", "original",)
 
-    def main(self, text, random_seed, model, max_tokens, context_size, apply_instructions, instructions, strip_thinking, adv_options_config=None):
+    def main(self, text, random_seed, model, max_tokens, context_size, apply_instructions, instructions, strip_thinking, concatenate_user_prompt, adv_options_config=None):
         model_path = os.path.join(GLOBAL_MODELS_DIR, model)
 
         if model.endswith(".gguf"):
@@ -76,73 +77,11 @@ class Searge_LLM_Node:
             )
 
             if apply_instructions:
-                req = instructions.replace("{prompt}", text) if "{prompt}" in instructions else f"{instructions} {text}"
                 messages = [
                     {"role": "system",
-                     "content": f"You are a helpful assistant."},
+                     "content": instructions},
                     {"role": "user",
-                     "content": f"An image generation prompt is a single paragraph summary to describe the subject and "
-                                f"style of an image. It includes a description of the kind of image, the subject of "
-                                f"the image, and some description of the image medium and style in the form of short "
-                                f"keyword.\n\nCreate an image generation prompt for the subject \"a creepy creature "
-                                f"shadow in the dark in a dimly lit tunnel\" in the style \"digital art illustration "
-                                f"with intricate details\"."},
-                    {"role": "assistant",
-                     "content": f"Image Description: A digitally crafted illustration portrays a chilling scene within "
-                                f"a dimly lit, cavernous tunnel. The dominant subject of the image is a mysterious "
-                                f"creature, its form subtly discernible only as a menacing shadow on the walls of the "
-                                f"tunnel. Its elongated silhouette suggests a serpentine creature with sharp "
-                                f"protrusions and an ominous aura. The creature's eyes, a pair of glowing orbs, appear "
-                                f"eerily human-like yet alien. The tunnel is riddled with intricate details that "
-                                f"enhance the eerie atmosphere: dust particles floating lazily in the feeble light, "
-                                f"ancient and crumbling stone, water droplets sparkling on the damp walls, and a "
-                                f"hauntingly beautiful, bioluminescent fungi growing in the shadows. The dimly lit "
-                                f"environment is highlighted by strategically placed light sources that create "
-                                f"dramatic chiaroscuro effects, casting an unsettling and atmospheric glow on the "
-                                f"scene. Digital Art Illustration with Intricate Details (Dark, Atmospheric, "
-                                f"Suspenseful)"},
-                    {"role": "user",
-                     "content": "Now compile the description and style into a single paragraph summary"},
-                    {"role": "assistant",
-                     "content": f"Digital art illustration featuring a dark, atmospheric, and suspenseful scene within "
-                                f"a dimly lit, cavernous tunnel. The subject of the image is a mysterious creature, "
-                                f"depicted only as a menacing shadow on the walls, with elongated silhouette and sharp "
-                                f"protrusions. The creature's eyes, a pair of glowing orbs, appear eerily human-like "
-                                f"yet alien. The tunnel is adorned with intricate details, such as dust particles, "
-                                f"ancient crumbling stone, water droplets, and a hauntingly beautiful bioluminescent "
-                                f"fungi growing in the shadows. Dramatic chiaroscuro effects are created through "
-                                f"strategically placed light sources, casting an unsettling and atmospheric glow on "
-                                f"the scene."},
-                    {"role": "user",
-                     "content": f"create a detailed summary without the title or style"},
-                    {"role": "assistant",
-                     "content": f"A dimly lit, cavernous tunnel is the setting for this chilling digital illustration. "
-                                f"A mysterious creature lurks in the shadows, its elongated silhouette suggestive of a "
-                                f"serpentine creature with sharp protrusions and an ominous aura. The creature's eyes, "
-                                f"a pair of glowing orbs, appear eerily human-like yet alien. The tunnel is riddled "
-                                f"with intricate details that enhance the eerie atmosphere: dust particles floating "
-                                f"lazily in the feeble light, ancient and crumbling stone, water droplets sparkling on "
-                                f"the damp walls, and a hauntingly beautiful, bioluminescent fungi growing in the "
-                                f"shadows. Dramatic chiaroscuro effects are created through strategically placed light "
-                                f"sources, casting an unsettling and atmospheric glow on the scene."},
-                    {"role": "user",
-                     "content": f"Generate a prompt from \"magical garden, sitting on a blue_bench, Disney Princess in "
-                                f"pink_dress, blonde_hair, portrait, Pixar, Disney style, photorealistic, high "
-                                f"details, detailed skin, pores, freckles\""},
-                    {"role": "assistant",
-                     "content": f"In a captivating, Pixar-inspired, Disney-style, photorealistic portrait, a magical "
-                                f"garden unfolds as a breathtaking backdrop. The subject of the image is a Disney "
-                                f"Princess, dressed elegantly in a pink gown with flowing fabric, sitting serenely on "
-                                f"a blue bench. The princess boasts long, blonde hair and a radiant smile. The garden "
-                                f"is meticulously detailed, with vibrant, enchanted flora and fauna, as well as "
-                                f"whimsical details like sparkling fairy lights and a picturesque waterfall. The "
-                                f"princess is highlighted against the lush, detailed foliage, with a focus on the "
-                                f"high-definition details of her porcelain skin, visible freckles, and the intricacies "
-                                f"of her elegant gown. The image is rendered in the captivating, photorealistic style "
-                                f"that exemplifies both the Disney and Pixar brands, capturing the princess's timeless "
-                                f"beauty and the magic of her enchanting surroundings."},
-                    {"role": "user",
-                     "content": req},
+                     "content": text}
                 ]
             else:
                 messages = [
@@ -188,7 +127,15 @@ class Searge_LLM_Node:
                     if strip_thinking:
                         result_text = (result_text[:start] + result_text[end+8:]).strip()
 
-            return (thinking, result_text, text)
+            # Apply concatenation based on user preference
+            if concatenate_user_prompt == "beginning":
+                generated_output = text + "\n\n" + result_text
+            elif concatenate_user_prompt == "end":
+                generated_output = result_text + "\n\n" + text
+            else:  # "no"
+                generated_output = result_text
+
+            return (thinking, generated_output, text)
         else:
             return ("", "NOT A GGUF MODEL", text)
 
