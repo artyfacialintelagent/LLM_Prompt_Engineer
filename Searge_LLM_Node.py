@@ -2,6 +2,7 @@ import importlib
 import os
 import random
 import torch
+import gc
 
 import folder_paths
 
@@ -128,6 +129,12 @@ def process_llm(text, random_seed, model, max_tokens, context_size, batch_size, 
             thinking_list.append(thinking)
             generated_list.append(generated_output)
             original_list.append(text)
+
+        if model_to_use:
+            del model_to_use
+            model_to_use = None
+        gc.collect()
+        torch.cuda.empty_cache()
 
         return thinking_list, generated_list, original_list
     else:
