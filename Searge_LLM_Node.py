@@ -196,6 +196,7 @@ class LLM_Enhanced_TextEncoder:
                 "apply_instructions": ("BOOLEAN", {"default": True}),
                 "instructions": ("STRING", {"multiline": False, "default": DEFAULT_INSTRUCTIONS}),
                 "strip_thinking": ("BOOLEAN", {"default": False}),
+                "strip_tags": ("STRING", {"multiline": False, "default": ""}),
                 "concatenate_user_prompt": (["no", "beginning", "end"], {"default": "end"}),
                 "clip": ("CLIP",),
             },
@@ -206,44 +207,100 @@ class LLM_Enhanced_TextEncoder:
 
     CATEGORY = "Searge/LLM"
     FUNCTION = "main"
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "CONDITIONING",)
-    RETURN_NAMES = ("thinking", "generated", "original", "conditioning",)
-    OUTPUT_IS_LIST = (True, True, True, False,)
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "CONDITIONING", "CONDITIONING",)
+    RETURN_NAMES = ("thinking", "generated (all)", "generated (stripped tags)", "original", "conditioning (all)", "conditioning (stripped tags)",)
+    OUTPUT_IS_LIST = (True, True, True, True, False, False,)
 
-    def main(self, text, random_seed, model, max_tokens, context_size, batch_size, apply_instructions, instructions, strip_thinking, concatenate_user_prompt, clip, adv_options_config=None):
+    def main(self, text, random_seed, model, max_tokens, context_size, batch_size, apply_instructions, instructions, strip_thinking, concatenate_user_prompt, strip_tags, clip, adv_options_config=None):
         thinking_list, generated_list, original_list = process_llm(text, random_seed, model, max_tokens, context_size, batch_size, apply_instructions, instructions, strip_thinking, concatenate_user_prompt, adv_options_config)
         
-        cond_list = []
-        pooled_list = []
+        # Parse strip_tags into a list
+        tags_to_strip = [tag.strip() for tag in strip_tags.split(',') if tag.strip()]
         
+        # Process text for "all" version (remove tag markers only)
+        generated_all_list = []
         for generated_output in generated_list:
+            processed_text = generated_output
+            for tag in tags_to_strip:
+                # Case-insensitive removal of opening and closing tags
+                import re
+                processed_text = re.sub(f'<{re.escape(tag)}>', '', processed_text, flags=re.IGNORECASE)
+                processed_text = re.sub(f'</{re.escape(tag)}>', '', processed_text, flags=re.IGNORECASE)
+            generated_all_list.append(processed_text)
+        
+        # Process text for "stripped tags" version (remove tags and content)
+        generated_stripped_list = []
+        for generated_output in generated_list:
+            processed_text = generated_output
+            for tag in tags_to_strip:
+                # Case-insensitive removal of tags and their content
+                import re
+                processed_text = re.sub(f'<{re.escape(tag)}>.*?</{re.escape(tag)}>', '', processed_text, flags=re.IGNORECASE | re.DOTALL)
+            generated_stripped_list.append(processed_text)
+        
+        # Create conditioning for "all" version
+        cond_all_list = []
+        pooled_all_list = []
+        
+        for generated_output in generated_all_list:
             tokens = clip.tokenize(generated_output)
             cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
-            cond_list.append(cond)
-            pooled_list.append(pooled)
+            cond_all_list.append(cond)
+            pooled_all_list.append(pooled)
 
-        conditioning = None
-        if len(cond_list) > 0:
+        conditioning_all = None
+        if len(cond_all_list) > 0:
             # Ensure all tensors have the same sequence length (dim 1) before concatenation
-            max_len = max(c.shape[1] for c in cond_list)
-            for i, c in enumerate(cond_list):
+            max_len = max(c.shape[1] for c in cond_all_list)
+            for i, c in enumerate(cond_all_list):
                 if c.shape[1] < max_len:
                     pad_len = max_len - c.shape[1]
                     # Pad dim 1 (sequence length). Tensor is [Batch, Seq, Dim]
                     # F.pad args are (last_dim_left, last_dim_right, 2nd_last_left, 2nd_last_right)
-                    cond_list[i] = torch.nn.functional.pad(c, (0, 0, 0, pad_len))
+                    cond_all_list[i] = torch.nn.functional.pad(c, (0, 0, 0, pad_len))
 
-            batched_cond = torch.cat(cond_list, dim=0)
+            batched_cond = torch.cat(cond_all_list, dim=0)
             
             # Handle pooled output which might be None (e.g. for some CLIP models)
-            if pooled_list[0] is not None:
-                batched_pooled = torch.cat(pooled_list, dim=0)
+            if pooled_all_list[0] is not None:
+                batched_pooled = torch.cat(pooled_all_list, dim=0)
             else:
                 batched_pooled = None
                 
-            conditioning = [[batched_cond, {"pooled_output": batched_pooled}]]
+            conditioning_all = [[batched_cond, {"pooled_output": batched_pooled}]]
+        
+        # Create conditioning for "stripped tags" version
+        cond_stripped_list = []
+        pooled_stripped_list = []
+        
+        for generated_output in generated_stripped_list:
+            tokens = clip.tokenize(generated_output)
+            cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
+            cond_stripped_list.append(cond)
+            pooled_stripped_list.append(pooled)
+
+        conditioning_stripped = None
+        if len(cond_stripped_list) > 0:
+            # Ensure all tensors have the same sequence length (dim 1) before concatenation
+            max_len = max(c.shape[1] for c in cond_stripped_list)
+            for i, c in enumerate(cond_stripped_list):
+                if c.shape[1] < max_len:
+                    pad_len = max_len - c.shape[1]
+                    # Pad dim 1 (sequence length). Tensor is [Batch, Seq, Dim]
+                    # F.pad args are (last_dim_left, last_dim_right, 2nd_last_left, 2nd_last_right)
+                    cond_stripped_list[i] = torch.nn.functional.pad(c, (0, 0, 0, pad_len))
+
+            batched_cond = torch.cat(cond_stripped_list, dim=0)
             
-        return (thinking_list, generated_list, original_list, conditioning)
+            # Handle pooled output which might be None (e.g. for some CLIP models)
+            if pooled_stripped_list[0] is not None:
+                batched_pooled = torch.cat(pooled_stripped_list, dim=0)
+            else:
+                batched_pooled = None
+                
+            conditioning_stripped = [[batched_cond, {"pooled_output": batched_pooled}]]
+            
+        return (thinking_list, generated_all_list, generated_stripped_list, original_list, conditioning_all, conditioning_stripped)
 
 
 class Searge_Output_Node:
