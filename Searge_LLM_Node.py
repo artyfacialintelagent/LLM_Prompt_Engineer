@@ -85,11 +85,16 @@ def process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thi
             # Update seed for this iteration
             model_to_use.set_seed(seeds[i])
             
+            # Build prompt for LLM (includes extra instructions if provided)
+            llm_prompt = prompt
+            if extra_prompt_instructions and extra_prompt_instructions.strip():
+                llm_prompt = f"{prompt}\n\n[END_USER_PROMPT]\n\n{extra_prompt_instructions}"
+            
             messages = [
                 {"role": "system",
                     "content": system_prompt},
                 {"role": "user",
-                    "content": prompt}
+                    "content": llm_prompt}
             ]
 
             llm_result = model_to_use.create_chat_completion(messages, **generate_kwargs)
@@ -145,6 +150,7 @@ class LLM_Batch_Enhancer:
                 "clip": ("CLIP",),
                 "system_prompt": ("STRING", {"multiline": False, "default": ""}),
                 "prompt": ("STRING", {"multiline": False, "dynamicPrompts": True, "default": ""}),
+                "extra_prompt_instructions": ("STRING", {"multiline": False, "default": ""}),
                 "random_seed": ("INT", {"default": 11, "min": 0, "max": 0xffffffffffffffff}),
                 "strip_thinking": ("BOOLEAN", {"default": True}),
                 "filter_tags": ("STRING", {"multiline": False, "default": ""}),
@@ -163,7 +169,7 @@ class LLM_Batch_Enhancer:
     RETURN_NAMES = ("conditioning (tags removed)", "conditioning (all)", "thinking", "generated (tags removed)", "generated (all)", "original",)
     OUTPUT_IS_LIST = (False, False, False, False, False, False,)
 
-    def main(self, prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, filter_tags, tag_instructions, clip, llm_settings=None):
+    def main(self, prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, filter_tags, tag_instructions, clip, extra_prompt_instructions, llm_settings=None):
         tags_to_strip = [tag.strip() for tag in filter_tags.split(',') if tag.strip()]
 
         if not tags_to_strip:
@@ -171,7 +177,7 @@ class LLM_Batch_Enhancer:
         
         system_prompt = system_prompt.replace("{tag_instructions}", tag_instructions)
         
-        thinking_list, generated_list, original_list = process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings)
+        thinking_list, generated_list, original_list = process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings, extra_prompt_instructions)
         
         # Process text for "all" version (remove tag markers only)
         generated_all_list = []
