@@ -155,6 +155,7 @@ class LLM_Batch_Enhancer:
                 "filter_tags": ("STRING", {"multiline": False, "default": ""}),
                 "tag_instructions": ("STRING", {"multiline": False, "default": ""}),
                 "concatenate_user_prompt": (["no", "beginning", "end"], {"default": "end"}),
+                "replacements": ("STRING", {"multiline": False, "default": ""}),
                 "batch_size": ("INT", {"default": 1, "min": 1, "max": 100}),
             },
             "optional": {
@@ -168,7 +169,7 @@ class LLM_Batch_Enhancer:
     RETURN_NAMES = ("conditioning (tags removed)", "conditioning (all)", "thinking", "generated (tags removed)", "generated (all)", "original", "final system prompt",)
     OUTPUT_IS_LIST = (False, False, False, False, False, False, False,)
 
-    def main(self, prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, filter_tags, tag_instructions, clip, extra_prompt_instructions, llm_settings=None):
+    def main(self, prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, filter_tags, tag_instructions, clip, extra_prompt_instructions, replacements, llm_settings=None):
         tags_to_strip = [tag.strip() for tag in filter_tags.split(',') if tag.strip()]
 
         if tags_to_strip:
@@ -179,6 +180,27 @@ class LLM_Batch_Enhancer:
         system_prompt = system_prompt.replace("{tag_instructions}", tag_instructions)
         
         thinking_list, generated_list, original_list = process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings, extra_prompt_instructions)
+        
+        # Apply custom replacements if provided
+        if replacements and replacements.strip():
+            replacement_pairs = []
+            for pair in replacements.split(','):
+                pair = pair.strip()
+                if ':' in pair:
+                    bad_phrase, good_phrase = pair.split(':', 1)
+                    bad_phrase = bad_phrase.strip()
+                    good_phrase = good_phrase.strip()
+                    replacement_pairs.append((bad_phrase, good_phrase))
+            
+            if replacement_pairs:
+                for i, generated_output in enumerate(generated_list):
+                    for bad_phrase, good_phrase in replacement_pairs:
+                        generated_output = generated_output.replace(bad_phrase, good_phrase)
+                    # Remove anything in parentheses (including the parentheses)
+                    generated_output = re.sub(r'\([^)]*\)', '', generated_output)
+                    # Clean up any double spaces left behind
+                    generated_output = re.sub(r'\s+', ' ', generated_output).strip()
+                    generated_list[i] = generated_output
         
         # Process text for "all" version (remove tag markers only)
         generated_all_list = []
