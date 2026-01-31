@@ -198,8 +198,8 @@ class LLM_Batch_Enhancer:
                         generated_output = generated_output.replace(bad_phrase, good_phrase)
                     # Remove anything in parentheses (including the parentheses)
                     generated_output = re.sub(r'\([^)]*\)', '', generated_output)
-                    # Clean up any double spaces left behind
-                    generated_output = re.sub(r'\s+', ' ', generated_output).strip()
+                    # Clean up any double spaces left behind (but preserve newlines)
+                    generated_output = re.sub(r' +', ' ', generated_output).strip()
                     generated_list[i] = generated_output
         
         # Process text for "all" version (remove tag markers only)
