@@ -161,7 +161,7 @@ class LLM_Batch_Enhancer:
     FUNCTION = "main"
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "STRING", "STRING", "STRING", "STRING",)
     RETURN_NAMES = ("conditioning (tags removed)", "conditioning (all)", "thinking", "generated (tags removed)", "generated (all)", "original",)
-    OUTPUT_IS_LIST = (False, False, True, True, True, True,)
+    OUTPUT_IS_LIST = (False, False, False, False, False, False,)
 
     def main(self, prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, filter_tags, tag_instructions, clip, llm_settings=None):
         tags_to_strip = [tag.strip() for tag in filter_tags.split(',') if tag.strip()]
@@ -253,8 +253,18 @@ class LLM_Batch_Enhancer:
                 batched_pooled = None
                 
             conditioning_stripped = [[batched_cond, {"pooled_output": batched_pooled}]]
+        
+        def format_batch_output(items):
+            """Format a list of items into a numbered diagnostic string."""
+            return "\n\n".join(f"===== Prompt {i+1} =====\n{item}" for i, item in enumerate(items))
+
+        # Join string lists with numbering for diagnostic output
+        thinking_output = format_batch_output(thinking_list)
+        generated_stripped_output = format_batch_output(generated_stripped_list)
+        generated_all_output = format_batch_output(generated_all_list)
+        original_output = format_batch_output(original_list)
             
-        return (conditioning_stripped, conditioning_all, thinking_list, generated_stripped_list, generated_all_list, original_list)
+        return (conditioning_stripped, conditioning_all, thinking_output, generated_stripped_output, generated_all_output, original_output)
 
 
 class LLM_Output_Node:
