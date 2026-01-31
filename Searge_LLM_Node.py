@@ -148,6 +148,7 @@ class LLM_Batch_Enhancer:
                 "random_seed": ("INT", {"default": 11, "min": 0, "max": 0xffffffffffffffff}),
                 "strip_thinking": ("BOOLEAN", {"default": True}),
                 "filter_tags": ("STRING", {"multiline": False, "default": ""}),
+                "tag_instructions": ("STRING", {"multiline": False, "default": ""}),
                 "concatenate_user_prompt": (["no", "beginning", "end"], {"default": "end"}),
                 "batch_size": ("INT", {"default": 1, "min": 1, "max": 100}),
             },
@@ -162,11 +163,15 @@ class LLM_Batch_Enhancer:
     RETURN_NAMES = ("thinking", "generated (all)", "generated (tags removed)", "original", "conditioning (all)", "conditioning (tags removed)",)
     OUTPUT_IS_LIST = (True, True, True, True, False, False,)
 
-    def main(self, prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, filter_tags, clip, llm_settings=None):
-        thinking_list, generated_list, original_list = process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings)
-        
-        # Parse filter_tags into a list
+    def main(self, prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, filter_tags, tag_instructions, clip, llm_settings=None):
         tags_to_strip = [tag.strip() for tag in filter_tags.split(',') if tag.strip()]
+
+        if not tags_to_strip:
+            tag_instructions = ""
+        
+        system_prompt = system_prompt.replace("{tag_instructions}", tag_instructions)
+        
+        thinking_list, generated_list, original_list = process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings)
         
         # Process text for "all" version (remove tag markers only)
         generated_all_list = []
@@ -184,7 +189,6 @@ class LLM_Batch_Enhancer:
             processed_text = generated_output
             for tag in tags_to_strip:
                 # Case-insensitive removal of tags and their content
-                import re
                 processed_text = re.sub(f'<{re.escape(tag)}>.*?</{re.escape(tag)}>', '', processed_text, flags=re.IGNORECASE | re.DOTALL)
             generated_stripped_list.append(processed_text)
         
