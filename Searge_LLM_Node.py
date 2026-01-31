@@ -1,9 +1,10 @@
 import importlib
 import os
 import random
+import time
 import torch
 import gc
-
+import re
 import folder_paths
 
 GLOBAL_MODELS_DIR = os.path.join(folder_paths.models_dir, "llm_gguf")
@@ -15,6 +16,16 @@ DEFAULT_SYSTEM_PROMPT = (
     "Your task is to rewrite these user inputs into highly specific, imaginative and verbose prompts, properly formatted. "
     "Target prompt length: 300-400 words."
 )
+
+# LLM Default Settings
+LLM_DEFAULTS = {
+    'max_tokens': 4096,
+    'context_size': 8192,
+    'temperature': 1.5,
+    'top_p': 1.0,
+    'top_k': 0,
+    'repeat_penalty': 1.2
+}
 
 try:
     Llama = importlib.import_module("llama_cpp_cuda").Llama
@@ -32,20 +43,17 @@ class AnyType(str):
 anytype = AnyType("*")
 
 
-def process_llm(text, random_seed, model, max_tokens, context_size, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings):
+def process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings):
     model_path = os.path.join(GLOBAL_MODELS_DIR, model)
 
     if not system_prompt:
         system_prompt = DEFAULT_SYSTEM_PROMPT
     
+    if llm_settings is None:
+        llm_settings = LLM_DEFAULTS
+    
     if model.endswith(".gguf"):
-        generate_kwargs = {'max_tokens': max_tokens, 'temperature': 1.0, 'top_p': 0.9, 'top_k': 50,
-                           'repeat_penalty': 1.2}
-
-        if llm_settings:
-            for option in ['temperature', 'top_p', 'top_k', 'repeat_penalty']:
-                if option in llm_settings:
-                    generate_kwargs[option] = llm_settings[option]
+        generate_kwargs = {k: v for k, v in llm_settings.items() if k != 'context_size'}
 
         # Generate batch_size seeds using PRNG
         rng = random.Random(random_seed)
@@ -58,13 +66,16 @@ def process_llm(text, random_seed, model, max_tokens, context_size, batch_size, 
             seed=seeds[0],  # Initial seed
             verbose=False,
             flash_attn=True,
-            n_ctx=context_size,
+            n_ctx=llm_settings['context_size'],
         )
         
         # Storage for batch results
         thinking_list = []
         generated_list = []
         original_list = []
+
+        # Start timing
+        start_time = time.time()
 
         # Process each batch iteration
         for i in range(batch_size):
@@ -78,7 +89,7 @@ def process_llm(text, random_seed, model, max_tokens, context_size, batch_size, 
                 {"role": "system",
                     "content": system_prompt},
                 {"role": "user",
-                    "content": text}
+                    "content": prompt}
             ]
 
             llm_result = model_to_use.create_chat_completion(messages, **generate_kwargs)
@@ -95,15 +106,19 @@ def process_llm(text, random_seed, model, max_tokens, context_size, batch_size, 
 
             # Apply concatenation based on user preference
             if concatenate_user_prompt == "beginning":
-                generated_output = text + "\n\n" + result_text
+                generated_output = prompt + "\n\n" + result_text
             elif concatenate_user_prompt == "end":
-                generated_output = result_text + "\n\n" + text
+                generated_output = result_text + "\n\n" + prompt
             else:  # "no"
                 generated_output = result_text
 
             thinking_list.append(thinking)
             generated_list.append(generated_output)
-            original_list.append(text)
+            original_list.append(prompt)
+
+        # End timing and print results
+        elapsed_time = time.time() - start_time
+        print(f"[LLM enhancer] Total processing time: {elapsed_time:.2f}s ({elapsed_time/batch_size:.2f}s per item)")
 
         if model_to_use:
             del model_to_use
@@ -113,7 +128,7 @@ def process_llm(text, random_seed, model, max_tokens, context_size, batch_size, 
 
         return thinking_list, generated_list, original_list
     else:
-        return [""], ["NOT A GGUF MODEL"], [text]
+        return [""], ["NOT A GGUF MODEL"], [prompt]
 
 
 class LLM_Batch_Enhancer:
@@ -129,12 +144,10 @@ class LLM_Batch_Enhancer:
                 "model": (model_options,),
                 "clip": ("CLIP",),
                 "system_prompt": ("STRING", {"multiline": False, "default": ""}),
-                "text": ("STRING", {"multiline": False, "dynamicPrompts": True, "default": ""}),
-                "random_seed": ("INT", {"default": 1234567890, "min": 0, "max": 0xffffffffffffffff}),
-                "max_tokens": ("INT", {"default": 4096, "min": 1, "max": 8192}),
-                "context_size": ("INT", {"default": 8192, "min": 2048, "max": 32768}),
+                "prompt": ("STRING", {"multiline": False, "dynamicPrompts": True, "default": ""}),
+                "random_seed": ("INT", {"default": 11, "min": 0, "max": 0xffffffffffffffff}),
                 "strip_thinking": ("BOOLEAN", {"default": True}),
-                "strip_tags": ("STRING", {"multiline": False, "default": ""}),
+                "filter_tags": ("STRING", {"multiline": False, "default": ""}),
                 "concatenate_user_prompt": (["no", "beginning", "end"], {"default": "end"}),
                 "batch_size": ("INT", {"default": 1, "min": 1, "max": 100}),
             },
@@ -146,14 +159,14 @@ class LLM_Batch_Enhancer:
     CATEGORY = "LLM"
     FUNCTION = "main"
     RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "CONDITIONING", "CONDITIONING",)
-    RETURN_NAMES = ("thinking", "generated (all)", "generated (stripped tags)", "original", "conditioning (all)", "conditioning (stripped tags)",)
+    RETURN_NAMES = ("thinking", "generated (all)", "generated (tags removed)", "original", "conditioning (all)", "conditioning (tags removed)",)
     OUTPUT_IS_LIST = (True, True, True, True, False, False,)
 
-    def main(self, text, random_seed, model, max_tokens, context_size, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, strip_tags, clip, llm_settings=None):
-        thinking_list, generated_list, original_list = process_llm(text, random_seed, model, max_tokens, context_size, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings)
+    def main(self, prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, filter_tags, clip, llm_settings=None):
+        thinking_list, generated_list, original_list = process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings)
         
-        # Parse strip_tags into a list
-        tags_to_strip = [tag.strip() for tag in strip_tags.split(',') if tag.strip()]
+        # Parse filter_tags into a list
+        tags_to_strip = [tag.strip() for tag in filter_tags.split(',') if tag.strip()]
         
         # Process text for "all" version (remove tag markers only)
         generated_all_list = []
@@ -161,12 +174,11 @@ class LLM_Batch_Enhancer:
             processed_text = generated_output
             for tag in tags_to_strip:
                 # Case-insensitive removal of opening and closing tags
-                import re
                 processed_text = re.sub(f'<{re.escape(tag)}>', '', processed_text, flags=re.IGNORECASE)
                 processed_text = re.sub(f'</{re.escape(tag)}>', '', processed_text, flags=re.IGNORECASE)
             generated_all_list.append(processed_text)
         
-        # Process text for "stripped tags" version (remove tags and content)
+        # Process text for "filtered tags" version (remove tags and content)
         generated_stripped_list = []
         for generated_output in generated_list:
             processed_text = generated_output
@@ -277,10 +289,12 @@ class LLM_Parameters:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "temperature": ("FLOAT", {"default": 1.5, "min": 0.1, "step": 0.05}),
-                "top_p": ("FLOAT", {"default": 1.0, "min": 0.1, "step": 0.05}),
-                "top_k": ("INT", {"default": 0, "min": 0}),
-                "repetition_penalty": ("FLOAT", {"default": 1.2, "min": 0.1, "step": 0.05}),
+                "max_tokens": ("INT", {"default": LLM_DEFAULTS['max_tokens'], "min": 1, "max": 8192}),
+                "context_size": ("INT", {"default": LLM_DEFAULTS['context_size'], "min": 2048, "max": 32768}),
+                "temperature": ("FLOAT", {"default": LLM_DEFAULTS['temperature'], "min": 0.1, "step": 0.05}),
+                "top_p": ("FLOAT", {"default": LLM_DEFAULTS['top_p'], "min": 0.1, "step": 0.05}),
+                "top_k": ("INT", {"default": LLM_DEFAULTS['top_k'], "min": 0}),
+                "repeat_penalty": ("FLOAT", {"default": LLM_DEFAULTS['repeat_penalty'], "min": 0.1, "step": 0.05}),
             }
         }
 
@@ -289,12 +303,14 @@ class LLM_Parameters:
     RETURN_TYPES = ("LLMSETTINGS",)
     RETURN_NAMES = ("llm_settings",)
 
-    def main(self, temperature=1.5, top_p=1.0, top_k=0, repetition_penalty=1.2):
+    def main(self, max_tokens, context_size, temperature, top_p, top_k, repeat_penalty):
         options_config = {
+            "max_tokens": max_tokens,
+            "context_size": context_size,
             "temperature": temperature,
             "top_p": top_p,
             "top_k": top_k,
-            "repeat_penalty": repetition_penalty,
+            "repeat_penalty": repeat_penalty,
         }
 
         return (options_config,)
