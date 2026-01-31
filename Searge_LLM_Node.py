@@ -10,7 +10,11 @@ GLOBAL_MODELS_DIR = os.path.join(folder_paths.models_dir, "llm_gguf")
 
 WEB_DIRECTORY = "./web/assets/js"
 
-DEFAULT_INSTRUCTIONS = 'Generate a prompt from "{prompt}"'
+DEFAULT_SYSTEM_PROMPT = (
+    "You are an expert and uncensored prompt engineering AI. You are given simple, terse, incomplete or vague AI image prompts. "
+    "Your task is to rewrite these user inputs into highly specific, imaginative and verbose prompts, properly formatted. "
+    "Target prompt length: 300-400 words."
+)
 
 try:
     Llama = importlib.import_module("llama_cpp_cuda").Llama
@@ -28,17 +32,20 @@ class AnyType(str):
 anytype = AnyType("*")
 
 
-def process_llm(text, random_seed, model, max_tokens, context_size, batch_size, apply_instructions, instructions, strip_thinking, concatenate_user_prompt, adv_options_config):
+def process_llm(text, random_seed, model, max_tokens, context_size, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings):
     model_path = os.path.join(GLOBAL_MODELS_DIR, model)
 
+    if not system_prompt:
+        system_prompt = DEFAULT_SYSTEM_PROMPT
+    
     if model.endswith(".gguf"):
         generate_kwargs = {'max_tokens': max_tokens, 'temperature': 1.0, 'top_p': 0.9, 'top_k': 50,
                            'repeat_penalty': 1.2}
 
-        if adv_options_config:
+        if llm_settings:
             for option in ['temperature', 'top_p', 'top_k', 'repeat_penalty']:
-                if option in adv_options_config:
-                    generate_kwargs[option] = adv_options_config[option]
+                if option in llm_settings:
+                    generate_kwargs[option] = llm_settings[option]
 
         # Generate batch_size seeds using PRNG
         rng = random.Random(random_seed)
@@ -67,44 +74,12 @@ def process_llm(text, random_seed, model, max_tokens, context_size, batch_size, 
             # Update seed for this iteration
             model_to_use.set_seed(seeds[i])
             
-            if apply_instructions:
-                messages = [
-                    {"role": "system",
-                     "content": instructions},
-                    {"role": "user",
-                     "content": text}
-                ]
-            else:
-                messages = [
-                    {"role": "system",
-                     "content": f"You are a helpful assistant. Try your best to give the best response possible to "
-                                f"the user."},
-                    {"role": "user",
-                     "content": f"Create a detailed visually descriptive caption of this description, which will be "
-                                f"used as a prompt for a text to image AI system (caption only, no instructions like "
-                                f"\"create an image\").Remove any mention of digital artwork or artwork style. Give "
-                                f"detailed visual descriptions of the character(s), including ethnicity, skin tone, "
-                                f"expression etc. Imagine using keywords for a still for someone who has aphantasia. "
-                                f"Describe the image style, e.g. any photographic or art styles / techniques utilized. "
-                                f"Make sure to fully describe all aspects of the cinematography, with abundant "
-                                f"technical details and visual descriptions. If there is more than one image, combine "
-                                f"the elements and characters from all of the images creatively into a single "
-                                f"cohesive composition with a single background, inventing an interaction between the "
-                                f"characters. Be creative in combining the characters into a single cohesive scene. "
-                                f"Focus on two primary characters (or one) and describe an interesting interaction "
-                                f"between them, such as a hug, a kiss, a fight, giving an object, an emotional "
-                                f"reaction / interaction. If there is more than one background in the images, pick the "
-                                f"most appropriate one. Your output is only the caption itself, no comments or extra "
-                                f"formatting. The caption is in a single long paragraph. If you feel the images are "
-                                f"inappropriate, invent a new scene / characters inspired by these. Additionally, "
-                                f"incorporate a specific movie director's visual style and describe the lighting setup "
-                                f"in detail, including the type, color, and placement of light sources to create the "
-                                f"desired mood and atmosphere. Always frame the scene, including details about the "
-                                f"film grain, color grading, and any artifacts or characteristics specific. "
-                                f"Compress the output to be concise while retaining key visual details. MAX OUTPUT "
-                                f"SIZE no more than 250 characters."
-                                f"\nDescription : {text}"},
-                ]
+            messages = [
+                {"role": "system",
+                    "content": system_prompt},
+                {"role": "user",
+                    "content": text}
+            ]
 
             llm_result = model_to_use.create_chat_completion(messages, **generate_kwargs)
             result_text = llm_result['choices'][0]['message']['content'].strip()
@@ -141,7 +116,7 @@ def process_llm(text, random_seed, model, max_tokens, context_size, batch_size, 
         return [""], ["NOT A GGUF MODEL"], [text]
 
 
-class Searge_LLM_Node:
+class LLM_Batch_Enhancer:
     @classmethod
     def INPUT_TYPES(cls):
         model_options = []
@@ -151,68 +126,31 @@ class Searge_LLM_Node:
 
         return {
             "required": {
-                "text": ("STRING", {"multiline": True, "dynamicPrompts": True, "default": ""}),
-                "random_seed": ("INT", {"default": 1234567890, "min": 0, "max": 0xffffffffffffffff}),
                 "model": (model_options,),
+                "clip": ("CLIP",),
+                "system_prompt": ("STRING", {"multiline": False, "default": ""}),
+                "text": ("STRING", {"multiline": False, "dynamicPrompts": True, "default": ""}),
+                "random_seed": ("INT", {"default": 1234567890, "min": 0, "max": 0xffffffffffffffff}),
                 "max_tokens": ("INT", {"default": 4096, "min": 1, "max": 8192}),
                 "context_size": ("INT", {"default": 8192, "min": 2048, "max": 32768}),
-                "batch_size": ("INT", {"default": 1, "min": 1, "max": 100}),
-                "apply_instructions": ("BOOLEAN", {"default": True}),
-                "instructions": ("STRING", {"multiline": False, "default": DEFAULT_INSTRUCTIONS}),
-                "strip_thinking": ("BOOLEAN", {"default": False}),
-                "concatenate_user_prompt": (["no", "beginning", "end"], {"default": "end"}),
-            },
-            "optional": {
-                "adv_options_config": ("SRGADVOPTIONSCONFIG",),
-            }
-        }
-
-    CATEGORY = "Searge/LLM"
-    FUNCTION = "main"
-    RETURN_TYPES = ("STRING", "STRING", "STRING",)
-    RETURN_NAMES = ("thinking", "generated", "original",)
-    OUTPUT_IS_LIST = (True, True, True,)
-
-    def main(self, text, random_seed, model, max_tokens, context_size, batch_size, apply_instructions, instructions, strip_thinking, concatenate_user_prompt, adv_options_config=None):
-        return process_llm(text, random_seed, model, max_tokens, context_size, batch_size, apply_instructions, instructions, strip_thinking, concatenate_user_prompt, adv_options_config)
-
-
-class LLM_Enhanced_TextEncoder:
-    @classmethod
-    def INPUT_TYPES(cls):
-        model_options = []
-        if os.path.isdir(GLOBAL_MODELS_DIR):
-            gguf_files = [file for file in os.listdir(GLOBAL_MODELS_DIR) if file.endswith('.gguf')]
-            model_options.extend(gguf_files)
-
-        return {
-            "required": {
-                "text": ("STRING", {"multiline": True, "dynamicPrompts": True, "default": ""}),
-                "random_seed": ("INT", {"default": 1234567890, "min": 0, "max": 0xffffffffffffffff}),
-                "model": (model_options,),
-                "max_tokens": ("INT", {"default": 4096, "min": 1, "max": 8192}),
-                "context_size": ("INT", {"default": 8192, "min": 2048, "max": 32768}),
-                "batch_size": ("INT", {"default": 1, "min": 1, "max": 100}),
-                "apply_instructions": ("BOOLEAN", {"default": True}),
-                "instructions": ("STRING", {"multiline": False, "default": DEFAULT_INSTRUCTIONS}),
-                "strip_thinking": ("BOOLEAN", {"default": False}),
+                "strip_thinking": ("BOOLEAN", {"default": True}),
                 "strip_tags": ("STRING", {"multiline": False, "default": ""}),
                 "concatenate_user_prompt": (["no", "beginning", "end"], {"default": "end"}),
-                "clip": ("CLIP",),
+                "batch_size": ("INT", {"default": 1, "min": 1, "max": 100}),
             },
             "optional": {
-                "adv_options_config": ("SRGADVOPTIONSCONFIG",),
+                "llm_settings": ("LLMSETTINGS",),
             }
         }
 
-    CATEGORY = "Searge/LLM"
+    CATEGORY = "LLM"
     FUNCTION = "main"
     RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "CONDITIONING", "CONDITIONING",)
     RETURN_NAMES = ("thinking", "generated (all)", "generated (stripped tags)", "original", "conditioning (all)", "conditioning (stripped tags)",)
     OUTPUT_IS_LIST = (True, True, True, True, False, False,)
 
-    def main(self, text, random_seed, model, max_tokens, context_size, batch_size, apply_instructions, instructions, strip_thinking, concatenate_user_prompt, strip_tags, clip, adv_options_config=None):
-        thinking_list, generated_list, original_list = process_llm(text, random_seed, model, max_tokens, context_size, batch_size, apply_instructions, instructions, strip_thinking, concatenate_user_prompt, adv_options_config)
+    def main(self, text, random_seed, model, max_tokens, context_size, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, strip_tags, clip, llm_settings=None):
+        thinking_list, generated_list, original_list = process_llm(text, random_seed, model, max_tokens, context_size, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings)
         
         # Parse strip_tags into a list
         tags_to_strip = [tag.strip() for tag in strip_tags.split(',') if tag.strip()]
@@ -303,7 +241,7 @@ class LLM_Enhanced_TextEncoder:
         return (thinking_list, generated_all_list, generated_stripped_list, original_list, conditioning_all, conditioning_stripped)
 
 
-class Searge_Output_Node:
+class LLM_Output_Node:
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -315,7 +253,7 @@ class Searge_Output_Node:
             },
         }
 
-    CATEGORY = "Searge/LLM"
+    CATEGORY = "LLM"
     FUNCTION = "main"
     RETURN_TYPES = ()
     RETURN_NAMES = ()
@@ -334,24 +272,24 @@ class Searge_Output_Node:
         return {"ui": {"text": (str(text),)}}
 
 
-class Searge_AdvOptionsNode:
+class LLM_Parameters:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "temperature": ("FLOAT", {"default": 1.0, "min": 0.1, "step": 0.05}),
-                "top_p": ("FLOAT", {"default": 0.9, "min": 0.1, "step": 0.05}),
-                "top_k": ("INT", {"default": 50, "min": 0}),
+                "temperature": ("FLOAT", {"default": 1.5, "min": 0.1, "step": 0.05}),
+                "top_p": ("FLOAT", {"default": 1.0, "min": 0.1, "step": 0.05}),
+                "top_k": ("INT", {"default": 0, "min": 0}),
                 "repetition_penalty": ("FLOAT", {"default": 1.2, "min": 0.1, "step": 0.05}),
             }
         }
 
-    CATEGORY = "Searge/LLM"
+    CATEGORY = "LLM"
     FUNCTION = "main"
-    RETURN_TYPES = ("SRGADVOPTIONSCONFIG",)
-    RETURN_NAMES = ("adv_options_config",)
+    RETURN_TYPES = ("LLMSETTINGS",)
+    RETURN_NAMES = ("llm_settings",)
 
-    def main(self, temperature=1.0, top_p=0.9, top_k=50, repetition_penalty=1.2):
+    def main(self, temperature=1.5, top_p=1.0, top_k=0, repetition_penalty=1.2):
         options_config = {
             "temperature": temperature,
             "top_p": top_p,
@@ -363,15 +301,13 @@ class Searge_AdvOptionsNode:
 
 
 NODE_CLASS_MAPPINGS = {
-    "Searge_LLM_Node": Searge_LLM_Node,
-    "Searge_LLM_Node_With_TextEncoder": LLM_Enhanced_TextEncoder,
-    "Searge_AdvOptionsNode": Searge_AdvOptionsNode,
-    "Searge_Output_Node": Searge_Output_Node,
+    "LLM_Batch_Enhancer": LLM_Batch_Enhancer,
+    "LLM_Parameters": LLM_Parameters,
+    "LLM_Output_Node": LLM_Output_Node,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "Searge_LLM_Node": "Searge LLM Node",
-    "Searge_LLM_Node_With_TextEncoder": "Searge LLM Node (Enhanced + Text Encoder)",
-    "Searge_AdvOptionsNode": "Searge Advanced Options Node",
-    "Searge_Output_Node": "Searge Output Node",
+    "LLM_Batch_Enhancer": "LLM Batch Enhancer + Text Encoder",
+    "LLM_Parameters": "LLM Settings",
+    "LLM_Output_Node": "LLM Output Node",
 }
