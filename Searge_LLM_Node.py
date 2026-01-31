@@ -42,8 +42,7 @@ class AnyType(str):
 
 anytype = AnyType("*")
 
-
-def process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings):
+def process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings, extra_prompt_instructions):
     model_path = os.path.join(GLOBAL_MODELS_DIR, model)
 
     if not system_prompt:
@@ -165,14 +164,16 @@ class LLM_Batch_Enhancer:
 
     CATEGORY = "LLM"
     FUNCTION = "main"
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "STRING", "STRING", "STRING", "STRING",)
-    RETURN_NAMES = ("conditioning (tags removed)", "conditioning (all)", "thinking", "generated (tags removed)", "generated (all)", "original",)
-    OUTPUT_IS_LIST = (False, False, False, False, False, False,)
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "STRING", "STRING", "STRING", "STRING", "STRING",)
+    RETURN_NAMES = ("conditioning (tags removed)", "conditioning (all)", "thinking", "generated (tags removed)", "generated (all)", "original", "final system prompt",)
+    OUTPUT_IS_LIST = (False, False, False, False, False, False, False,)
 
     def main(self, prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, filter_tags, tag_instructions, clip, extra_prompt_instructions, llm_settings=None):
         tags_to_strip = [tag.strip() for tag in filter_tags.split(',') if tag.strip()]
 
-        if not tags_to_strip:
+        if tags_to_strip:
+            tag_instructions = tag_instructions.replace("{filter_tags}", filter_tags)
+        else:
             tag_instructions = ""
         
         system_prompt = system_prompt.replace("{tag_instructions}", tag_instructions)
@@ -270,7 +271,7 @@ class LLM_Batch_Enhancer:
         generated_all_output = format_batch_output(generated_all_list)
         original_output = format_batch_output(original_list)
             
-        return (conditioning_stripped, conditioning_all, thinking_output, generated_stripped_output, generated_all_output, original_output)
+        return (conditioning_stripped, conditioning_all, thinking_output, generated_stripped_output, generated_all_output, original_output, system_prompt)
 
 
 class LLM_Output_Node:
