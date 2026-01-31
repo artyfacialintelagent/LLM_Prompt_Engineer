@@ -159,9 +159,9 @@ class LLM_Batch_Enhancer:
 
     CATEGORY = "LLM"
     FUNCTION = "main"
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "CONDITIONING", "CONDITIONING",)
-    RETURN_NAMES = ("thinking", "generated (all)", "generated (tags removed)", "original", "conditioning (all)", "conditioning (tags removed)",)
-    OUTPUT_IS_LIST = (True, True, True, True, False, False,)
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "STRING", "STRING", "STRING", "STRING",)
+    RETURN_NAMES = ("conditioning (tags removed)", "conditioning (all)", "thinking", "generated (tags removed)", "generated (all)", "original",)
+    OUTPUT_IS_LIST = (False, False, True, True, True, True,)
 
     def main(self, prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, filter_tags, tag_instructions, clip, llm_settings=None):
         tags_to_strip = [tag.strip() for tag in filter_tags.split(',') if tag.strip()]
@@ -254,7 +254,7 @@ class LLM_Batch_Enhancer:
                 
             conditioning_stripped = [[batched_cond, {"pooled_output": batched_pooled}]]
             
-        return (thinking_list, generated_all_list, generated_stripped_list, original_list, conditioning_all, conditioning_stripped)
+        return (conditioning_stripped, conditioning_all, thinking_list, generated_stripped_list, generated_all_list, original_list)
 
 
 class LLM_Output_Node:
