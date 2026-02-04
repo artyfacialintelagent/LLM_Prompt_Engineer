@@ -151,12 +151,14 @@ class LLM_Batch_Enhancer:
                 "prompt": ("STRING", {"multiline": False, "dynamicPrompts": True, "default": ""}),
                 "extra_prompt_instructions": ("STRING", {"multiline": False, "default": ""}),
                 "random_seed": ("INT", {"default": 11, "min": 0, "max": 0xffffffffffffffff}),
+                "enable_thinking": ("BOOLEAN", {"default": True}),
                 "strip_thinking": ("BOOLEAN", {"default": True}),
                 "filter_tags": ("STRING", {"multiline": False, "default": ""}),
                 "tag_instructions": ("STRING", {"multiline": False, "default": ""}),
                 "concatenate_user_prompt": (["no", "beginning", "end"], {"default": "end"}),
                 "replacements": ("STRING", {"multiline": False, "default": ""}),
                 "batch_size": ("INT", {"default": 1, "min": 1, "max": 100}),
+                "enable_LLM_enhancer": ("BOOLEAN", {"default": True}),
             },
             "optional": {
                 "llm_settings": ("LLMSETTINGS",),
@@ -169,7 +171,13 @@ class LLM_Batch_Enhancer:
     RETURN_NAMES = ("conditioning (tags removed)", "conditioning (all)", "thinking", "generated (tags removed)", "generated (all)", "original", "final system prompt",)
     OUTPUT_IS_LIST = (False, False, False, False, False, False, False,)
 
-    def main(self, prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, filter_tags, tag_instructions, clip, extra_prompt_instructions, replacements, llm_settings=None):
+    def main(self, prompt, random_seed, model, batch_size, system_prompt, enable_thinking, strip_thinking, concatenate_user_prompt, filter_tags, tag_instructions, clip, extra_prompt_instructions, replacements, enable_LLM_enhancer, llm_settings=None):
+        if not enable_LLM_enhancer:     # Simple text encoding without LLM processing
+            tokens = clip.tokenize(prompt)
+            cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
+            conditioning = [[cond, {"pooled_output": pooled}]]
+            return (conditioning, conditioning, "", prompt, prompt, prompt, "")
+        
         tags_to_strip = [tag.strip() for tag in filter_tags.split(',') if tag.strip()]
 
         if tags_to_strip:
@@ -178,6 +186,10 @@ class LLM_Batch_Enhancer:
             tag_instructions = ""
         
         system_prompt = system_prompt.replace("{tag_instructions}", tag_instructions)
+        
+        # Append /no_think if thinking is disabled
+        if not enable_thinking:
+            system_prompt = system_prompt + " /no_think"
         
         thinking_list, generated_list, original_list = process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings, extra_prompt_instructions)
         
