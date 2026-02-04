@@ -164,14 +164,13 @@ class LLM_Batch_Enhancer:
 
     CATEGORY = "LLM"
     FUNCTION = "main"
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING",)
-    RETURN_NAMES = ("thinking", "generated", "original", "final_system_prompt",)
-    OUTPUT_IS_LIST = (True, True, True, False,)
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "INT",)
+    RETURN_NAMES = ("thinking", "generated", "original", "final_system_prompt", "batch_size",)
 
     def main(self, prompt, random_seed, model, batch_size, system_prompt, enable_thinking, strip_thinking, concatenate_user_prompt, tag_instructions, extra_prompt_instructions, enable_LLM_enhancer, llm_settings=None):
         if not enable_LLM_enhancer:
             # Bypass LLM processing
-            return ([prompt], [prompt], [prompt], "")
+            return (prompt, prompt, prompt, "", 1)
         
         # Replace tag_instructions template
         system_prompt = system_prompt.replace("{tag_instructions}", tag_instructions)
@@ -181,8 +180,16 @@ class LLM_Batch_Enhancer:
             system_prompt = system_prompt + " /no_think"
         
         thinking_list, generated_list, original_list = process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings, extra_prompt_instructions)
+        
+        # Format lists as delimited strings
+        def format_list(items):
+            return "\n__BATCH_DELIMITER__\n".join(items)
+        
+        thinking_output = format_list(thinking_list)
+        generated_output = format_list(generated_list)
+        original_output = format_list(original_list)
             
-        return (thinking_list, generated_list, original_list, system_prompt)
+        return (thinking_output, generated_output, original_output, system_prompt, batch_size)
 
 
 class LLM_Text_Filter:
@@ -201,12 +208,11 @@ class LLM_Text_Filter:
     FUNCTION = "main"
     RETURN_TYPES = ("STRING", "STRING",)
     RETURN_NAMES = ("text (all)", "text (tags removed)",)
-    OUTPUT_IS_LIST = (True, True,)
 
     def main(self, text, filter_tags, replacements, remove_parentheses):
-        # Handle list input - if text is a list, process each item
-        if isinstance(text, list):
-            text_list = text
+        # Split by delimiter to get individual items
+        if "__BATCH_DELIMITER__" in text:
+            text_list = text.split("\n__BATCH_DELIMITER__\n")
         else:
             text_list = [text]
         
@@ -256,7 +262,11 @@ class LLM_Text_Filter:
                 processed_text = re.sub(f'<{re.escape(tag)}>.*?</{re.escape(tag)}>', '', processed_text, flags=re.IGNORECASE | re.DOTALL)
             text_stripped_list.append(processed_text)
         
-        return (text_all_list, text_stripped_list)
+        # Format as delimited strings
+        text_all_output = "\n__BATCH_DELIMITER__\n".join(text_all_list)
+        text_stripped_output = "\n__BATCH_DELIMITER__\n".join(text_stripped_list)
+        
+        return (text_all_output, text_stripped_output)
 
 
 class LLM_List_Encoder:
@@ -273,12 +283,11 @@ class LLM_List_Encoder:
     FUNCTION = "main"
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
-    OUTPUT_IS_LIST = (False,)
 
     def main(self, clip, text):
-        # Handle both single string and list of strings
-        if isinstance(text, list):
-            text_list = text
+        # Split by delimiter to get individual items
+        if "__BATCH_DELIMITER__" in text:
+            text_list = text.split("\n__BATCH_DELIMITER__\n")
         else:
             text_list = [text]
         
