@@ -146,17 +146,14 @@ class LLM_Batch_Enhancer:
         return {
             "required": {
                 "model": (model_options,),
-                "clip": ("CLIP",),
                 "system_prompt": ("STRING", {"multiline": False, "default": ""}),
                 "prompt": ("STRING", {"multiline": False, "dynamicPrompts": True, "default": ""}),
                 "extra_prompt_instructions": ("STRING", {"multiline": False, "default": ""}),
                 "random_seed": ("INT", {"default": 11, "min": 0, "max": 0xffffffffffffffff}),
                 "enable_thinking": ("BOOLEAN", {"default": True}),
                 "strip_thinking": ("BOOLEAN", {"default": True}),
-                "filter_tags": ("STRING", {"multiline": False, "default": ""}),
                 "tag_instructions": ("STRING", {"multiline": False, "default": ""}),
                 "concatenate_user_prompt": (["no", "beginning", "end"], {"default": "end"}),
-                "replacements": ("STRING", {"multiline": False, "default": ""}),
                 "batch_size": ("INT", {"default": 1, "min": 1, "max": 100}),
                 "enable_LLM_enhancer": ("BOOLEAN", {"default": True}),
             },
@@ -167,24 +164,16 @@ class LLM_Batch_Enhancer:
 
     CATEGORY = "LLM"
     FUNCTION = "main"
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "STRING", "STRING", "STRING", "STRING", "STRING",)
-    RETURN_NAMES = ("conditioning (tags removed)", "conditioning (all)", "thinking", "generated (tags removed)", "generated (all)", "original", "final system prompt",)
-    OUTPUT_IS_LIST = (False, False, False, False, False, False, False,)
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING",)
+    RETURN_NAMES = ("thinking", "generated", "original", "final_system_prompt",)
+    OUTPUT_IS_LIST = (True, True, True, False,)
 
-    def main(self, prompt, random_seed, model, batch_size, system_prompt, enable_thinking, strip_thinking, concatenate_user_prompt, filter_tags, tag_instructions, clip, extra_prompt_instructions, replacements, enable_LLM_enhancer, llm_settings=None):
-        if not enable_LLM_enhancer:     # Simple text encoding without LLM processing
-            tokens = clip.tokenize(prompt)
-            cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
-            conditioning = [[cond, {"pooled_output": pooled}]]
-            return (conditioning, conditioning, "", prompt, prompt, prompt, "")
+    def main(self, prompt, random_seed, model, batch_size, system_prompt, enable_thinking, strip_thinking, concatenate_user_prompt, tag_instructions, extra_prompt_instructions, enable_LLM_enhancer, llm_settings=None):
+        if not enable_LLM_enhancer:
+            # Bypass LLM processing
+            return ([prompt], [prompt], [prompt], "")
         
-        tags_to_strip = [tag.strip() for tag in filter_tags.split(',') if tag.strip()]
-
-        if tags_to_strip:
-            tag_instructions = tag_instructions.replace("{filter_tags}", filter_tags)
-        else:
-            tag_instructions = ""
-        
+        # Replace tag_instructions template
         system_prompt = system_prompt.replace("{tag_instructions}", tag_instructions)
         
         # Append /no_think if thinking is disabled
@@ -192,6 +181,34 @@ class LLM_Batch_Enhancer:
             system_prompt = system_prompt + " /no_think"
         
         thinking_list, generated_list, original_list = process_llm(prompt, random_seed, model, batch_size, system_prompt, strip_thinking, concatenate_user_prompt, llm_settings, extra_prompt_instructions)
+            
+        return (thinking_list, generated_list, original_list, system_prompt)
+
+
+class LLM_Text_Filter:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("STRING", {"multiline": True, "forceInput": True}),
+                "filter_tags": ("STRING", {"multiline": False, "default": ""}),
+                "replacements": ("STRING", {"multiline": False, "default": ""}),
+                "remove_parentheses": ("BOOLEAN", {"default": True}),
+            },
+        }
+
+    CATEGORY = "LLM"
+    FUNCTION = "main"
+    RETURN_TYPES = ("STRING", "STRING",)
+    RETURN_NAMES = ("text (all)", "text (tags removed)",)
+    OUTPUT_IS_LIST = (True, True,)
+
+    def main(self, text, filter_tags, replacements, remove_parentheses):
+        # Handle list input - if text is a list, process each item
+        if isinstance(text, list):
+            text_list = text
+        else:
+            text_list = [text]
         
         # Apply custom replacements if provided
         if replacements and replacements.strip():
@@ -205,107 +222,98 @@ class LLM_Batch_Enhancer:
                     replacement_pairs.append((bad_phrase, good_phrase))
             
             if replacement_pairs:
-                for i, generated_output in enumerate(generated_list):
+                for i, generated_output in enumerate(text_list):
                     for bad_phrase, good_phrase in replacement_pairs:
                         generated_output = generated_output.replace(bad_phrase, good_phrase)
+                    
                     # Remove anything in parentheses (including the parentheses)
-                    generated_output = re.sub(r'\([^)]*\)', '', generated_output)
+                    if remove_parentheses:
+                        generated_output = re.sub(r'\([^)]*\)', '', generated_output)
+                    
                     # Clean up any double spaces left behind (but preserve newlines)
                     generated_output = re.sub(r' +', ' ', generated_output).strip()
-                    generated_list[i] = generated_output
+                    text_list[i] = generated_output
+        
+        # Parse filter tags
+        tags_to_strip = [tag.strip() for tag in filter_tags.split(',') if tag.strip()]
         
         # Process text for "all" version (remove tag markers only)
-        generated_all_list = []
-        for generated_output in generated_list:
-            processed_text = generated_output
+        text_all_list = []
+        for text_output in text_list:
+            processed_text = text_output
             for tag in tags_to_strip:
                 # Case-insensitive removal of opening and closing tags
                 processed_text = re.sub(f'<{re.escape(tag)}>', '', processed_text, flags=re.IGNORECASE)
                 processed_text = re.sub(f'</{re.escape(tag)}>', '', processed_text, flags=re.IGNORECASE)
-            generated_all_list.append(processed_text)
+            text_all_list.append(processed_text)
         
         # Process text for "filtered tags" version (remove tags and content)
-        generated_stripped_list = []
-        for generated_output in generated_list:
-            processed_text = generated_output
+        text_stripped_list = []
+        for text_output in text_list:
+            processed_text = text_output
             for tag in tags_to_strip:
                 # Case-insensitive removal of tags and their content
                 processed_text = re.sub(f'<{re.escape(tag)}>.*?</{re.escape(tag)}>', '', processed_text, flags=re.IGNORECASE | re.DOTALL)
-            generated_stripped_list.append(processed_text)
+            text_stripped_list.append(processed_text)
         
-        # Create conditioning for "all" version
-        cond_all_list = []
-        pooled_all_list = []
+        return (text_all_list, text_stripped_list)
+
+
+class LLM_List_Encoder:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip": ("CLIP",),
+                "text": ("STRING", {"multiline": True, "forceInput": True}),
+            },
+        }
+
+    CATEGORY = "LLM"
+    FUNCTION = "main"
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    OUTPUT_IS_LIST = (False,)
+
+    def main(self, clip, text):
+        # Handle both single string and list of strings
+        if isinstance(text, list):
+            text_list = text
+        else:
+            text_list = [text]
         
-        for generated_output in generated_all_list:
-            tokens = clip.tokenize(generated_output)
+        # Create conditioning for each text
+        cond_list = []
+        pooled_list = []
+        
+        for text_output in text_list:
+            tokens = clip.tokenize(text_output)
             cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
-            cond_all_list.append(cond)
-            pooled_all_list.append(pooled)
+            cond_list.append(cond)
+            pooled_list.append(pooled)
 
-        conditioning_all = None
-        if len(cond_all_list) > 0:
-            # Ensure all tensors have the same sequence length (dim 1) before concatenation
-            max_len = max(c.shape[1] for c in cond_all_list)
-            for i, c in enumerate(cond_all_list):
-                if c.shape[1] < max_len:
-                    pad_len = max_len - c.shape[1]
-                    # Pad dim 1 (sequence length). Tensor is [Batch, Seq, Dim]
-                    # F.pad args are (last_dim_left, last_dim_right, 2nd_last_left, 2nd_last_right)
-                    cond_all_list[i] = torch.nn.functional.pad(c, (0, 0, 0, pad_len))
-
-            batched_cond = torch.cat(cond_all_list, dim=0)
-            
-            # Handle pooled output which might be None (e.g. for some CLIP models)
-            if pooled_all_list[0] is not None:
-                batched_pooled = torch.cat(pooled_all_list, dim=0)
-            else:
-                batched_pooled = None
-                
-            conditioning_all = [[batched_cond, {"pooled_output": batched_pooled}]]
+        if len(cond_list) == 0:
+            return (None,)
         
-        # Create conditioning for "stripped tags" version
-        cond_stripped_list = []
-        pooled_stripped_list = []
+        # Ensure all tensors have the same sequence length (dim 1) before concatenation
+        max_len = max(c.shape[1] for c in cond_list)
+        for i, c in enumerate(cond_list):
+            if c.shape[1] < max_len:
+                pad_len = max_len - c.shape[1]
+                # Pad dim 1 (sequence length). Tensor is [Batch, Seq, Dim]
+                cond_list[i] = torch.nn.functional.pad(c, (0, 0, 0, pad_len))
+
+        batched_cond = torch.cat(cond_list, dim=0)
         
-        for generated_output in generated_stripped_list:
-            tokens = clip.tokenize(generated_output)
-            cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
-            cond_stripped_list.append(cond)
-            pooled_stripped_list.append(pooled)
-
-        conditioning_stripped = None
-        if len(cond_stripped_list) > 0:
-            # Ensure all tensors have the same sequence length (dim 1) before concatenation
-            max_len = max(c.shape[1] for c in cond_stripped_list)
-            for i, c in enumerate(cond_stripped_list):
-                if c.shape[1] < max_len:
-                    pad_len = max_len - c.shape[1]
-                    # Pad dim 1 (sequence length). Tensor is [Batch, Seq, Dim]
-                    # F.pad args are (last_dim_left, last_dim_right, 2nd_last_left, 2nd_last_right)
-                    cond_stripped_list[i] = torch.nn.functional.pad(c, (0, 0, 0, pad_len))
-
-            batched_cond = torch.cat(cond_stripped_list, dim=0)
+        # Handle pooled output which might be None (e.g. for some CLIP models)
+        if pooled_list[0] is not None:
+            batched_pooled = torch.cat(pooled_list, dim=0)
+        else:
+            batched_pooled = None
             
-            # Handle pooled output which might be None (e.g. for some CLIP models)
-            if pooled_stripped_list[0] is not None:
-                batched_pooled = torch.cat(pooled_stripped_list, dim=0)
-            else:
-                batched_pooled = None
-                
-            conditioning_stripped = [[batched_cond, {"pooled_output": batched_pooled}]]
+        conditioning = [[batched_cond, {"pooled_output": batched_pooled}]]
         
-        def format_batch_output(items):
-            """Format a list of items into a numbered diagnostic string."""
-            return "\n\n".join(f"===== Prompt {i+1} =====\n{item}" for i, item in enumerate(items))
-
-        # Join string lists with numbering for diagnostic output
-        thinking_output = format_batch_output(thinking_list)
-        generated_stripped_output = format_batch_output(generated_stripped_list)
-        generated_all_output = format_batch_output(generated_all_list)
-        original_output = format_batch_output(original_list)
-            
-        return (conditioning_stripped, conditioning_all, thinking_output, generated_stripped_output, generated_all_output, original_output, system_prompt)
+        return (conditioning,)
 
 
 class LLM_Output_Node:
@@ -373,12 +381,16 @@ class LLM_Parameters:
 
 NODE_CLASS_MAPPINGS = {
     "LLM_Batch_Enhancer": LLM_Batch_Enhancer,
+    "LLM_Text_Filter": LLM_Text_Filter,
+    "LLM_List_Encoder": LLM_List_Encoder,
     "LLM_Parameters": LLM_Parameters,
     "LLM_Output_Node": LLM_Output_Node,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "LLM_Batch_Enhancer": "LLM Batch Enhancer + Text Encoder",
+    "LLM_Batch_Enhancer": "LLM Batch Enhancer",
+    "LLM_Text_Filter": "LLM Text Filter",
+    "LLM_List_Encoder": "LLM List Encoder",
     "LLM_Parameters": "LLM Settings",
     "LLM_Output_Node": "LLM Output Node",
 }
