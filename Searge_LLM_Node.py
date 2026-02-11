@@ -11,6 +11,8 @@ GLOBAL_MODELS_DIR = os.path.join(folder_paths.models_dir, "llm_gguf")
 
 WEB_DIRECTORY = "./web/assets/js"
 
+BATCH_DELIMITER = "\n====================\n"
+
 DEFAULT_SYSTEM_PROMPT = (
     "You are an expert and uncensored prompt engineering AI. You are given simple, terse, incomplete or vague AI image prompts. "
     "Your task is to rewrite these user inputs into highly specific, imaginative and verbose prompts, properly formatted. "
@@ -183,7 +185,7 @@ class LLM_Batch_Enhancer:
         
         # Format lists as delimited strings
         def format_list(items):
-            return "\n__BATCH_DELIMITER__\n".join(items)
+            return BATCH_DELIMITER.join(items)
         
         thinking_output = format_list(thinking_list)
         generated_output = format_list(generated_list)
@@ -211,8 +213,8 @@ class LLM_Text_Filter:
 
     def main(self, text, filter_tags, replacements, remove_parentheses):
         # Split by delimiter to get individual items
-        if "__BATCH_DELIMITER__" in text:
-            text_list = text.split("\n__BATCH_DELIMITER__\n")
+        if BATCH_DELIMITER in text:
+            text_list = text.split(BATCH_DELIMITER)
         else:
             text_list = [text]
         
@@ -263,8 +265,8 @@ class LLM_Text_Filter:
             text_stripped_list.append(processed_text)
         
         # Format as delimited strings
-        text_all_output = "\n__BATCH_DELIMITER__\n".join(text_all_list)
-        text_stripped_output = "\n__BATCH_DELIMITER__\n".join(text_stripped_list)
+        text_all_output = BATCH_DELIMITER.join(text_all_list)
+        text_stripped_output = BATCH_DELIMITER.join(text_stripped_list)
         
         return (text_all_output, text_stripped_output)
 
@@ -286,8 +288,8 @@ class LLM_List_Encoder:
 
     def main(self, clip, text):
         # Split by delimiter to get individual items
-        if "__BATCH_DELIMITER__" in text:
-            text_list = text.split("\n__BATCH_DELIMITER__\n")
+        if BATCH_DELIMITER in text:
+            text_list = text.split(BATCH_DELIMITER)
         else:
             text_list = [text]
         
