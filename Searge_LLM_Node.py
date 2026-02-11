@@ -194,7 +194,7 @@ class LLM_Batch_Enhancer:
         return (thinking_output, generated_output, original_output, system_prompt, batch_size)
 
 
-class LLM_Text_Filter:
+class LLM_Output_Filter:
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -392,7 +392,7 @@ class LLM_Parameters:
 
 NODE_CLASS_MAPPINGS = {
     "LLM_Batch_Enhancer": LLM_Batch_Enhancer,
-    "LLM_Text_Filter": LLM_Text_Filter,
+    "LLM_Output_Filter": LLM_Output_Filter,
     "LLM_List_Encoder": LLM_List_Encoder,
     "LLM_Parameters": LLM_Parameters,
     "LLM_Output_Node": LLM_Output_Node,
@@ -400,7 +400,7 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LLM_Batch_Enhancer": "LLM Batch Enhancer",
-    "LLM_Text_Filter": "LLM Text Filter",
+    "LLM_Output_Filter": "LLM Output Filter",
     "LLM_List_Encoder": "LLM List Encoder",
     "LLM_Parameters": "LLM Settings",
     "LLM_Output_Node": "LLM Output Node",
